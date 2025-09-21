@@ -6,35 +6,20 @@ const fs = require('fs');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
-const cors = require('cors'); // CORS 미들웨어 추가
-require('dotenv').config(); // .env 파일 사용을 위한 라이브러리
+const cors = require('cors'); 
+require('dotenv').config();
 
-// --- 환경 변수 로드 및 검증 (가장 먼저 실행) ---
-const API_KEY = process.env.GOOGLE_API_KEY;
-const EMAIL_USER = process.env.EMAIL_USER;
-const EMAIL_PASS = process.env.EMAIL_PASS;
-const RECIPIENT_EMAIL = process.env.RECIPIENT_EMAIL;
-
-// 서버 시작 전 필수 환경 변수가 모두 있는지 확인
-if (!API_KEY || !EMAIL_USER || !EMAIL_PASS || !RECIPIENT_EMAIL) {
-    console.error("!!! 치명적 오류: 필수 환경 변수가 Vercel에 설정되지 않았습니다.");
-    console.error("GOOGLE_API_KEY, EMAIL_USER, EMAIL_PASS, RECIPIENT_EMAIL 변수를 모두 확인해주세요.");
-    // 실제 운영에서는 여기서 프로세스를 종료할 수 있습니다.
-    // process.exit(1); 
-}
-
-// Express 앱과 Multer (파일 업로드 처리용)를 설정합니다.
+// Express 앱 설정
 const app = express();
-const upload = multer({ dest: '/tmp' }); // Vercel의 쓰기 가능한 임시 폴더
+app.set('trust proxy', 1);
+const upload = multer({ dest: '/tmp' });
 
-// --- 미들웨어 설정 ---
-// CORS 설정: GitHub Pages 및 개인 도메인에서의 요청을 허용합니다.
+// CORS 설정
 const allowedOrigins = [
     'http://artb.co.kr', 
     'https://artb.co.kr', 
     // 본인의 GitHub Pages 주소를 여기에 추가해주세요 (예: 'https://my-github-id.github.io')
 ];
-
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
@@ -45,18 +30,26 @@ const corsOptions = {
   },
   optionsSuccessStatus: 200
 };
-
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 app.use(express.json());
 
-// --- 서비스 초기화 (오류 진단 강화) ---
+// 환경 변수 로드 및 검증
+const API_KEY = process.env.GOOGLE_API_KEY;
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
+const RECIPIENT_EMAIL = process.env.RECIPIENT_EMAIL;
+
+if (!API_KEY || !EMAIL_USER || !EMAIL_PASS || !RECIPIENT_EMAIL) {
+    console.error("!!! 치명적 오류: 필수 환경 변수가 Vercel에 설정되지 않았습니다.");
+}
+
+// 서비스 초기화
 let genAI, transporter;
 try {
     if (!API_KEY) throw new Error("환경 변수 'GOOGLE_API_KEY'가 설정되지 않았습니다.");
     genAI = new GoogleGenerativeAI(API_KEY);
-    console.log("Google AI 서비스 초기화 성공.");
 
     if (!EMAIL_USER || !EMAIL_PASS) throw new Error("환경 변수 'EMAIL_USER' 또는 'EMAIL_PASS'가 설정되지 않았습니다.");
     transporter = nodemailer.createTransport({
@@ -66,14 +59,11 @@ try {
             pass: EMAIL_PASS,
         },
     });
-    console.log("Nodemailer (이메일) 서비스 초기화 성공.");
 } catch (error) {
-    console.error("### 치명적 오류: 서비스 초기화 실패! ###");
-    console.error(error.message);
-    console.error("Vercel의 [Settings] > [Environment Variables] 설정을 다시 확인해주세요.");
+    console.error("### 치명적 오류: 서비스 초기화 실패! ###", error.message);
 }
 
-// --- 사용량 제한 (Rate Limiter) 설정 ---
+// 사용량 제한 설정
 const apiLimiter = rateLimit({
 	windowMs: 15 * 60 * 1000,
 	max: 50,
@@ -81,7 +71,6 @@ const apiLimiter = rateLimit({
 	legacyHeaders: false,
     message: "AI 분석 요청 횟수가 너무 많습니다. 15분 후에 다시 시도해주세요.",
 });
-
 const formLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
     max: 10,
@@ -90,20 +79,22 @@ const formLimiter = rateLimit({
     message: "폼 제출 횟수가 너무 많습니다. 1시간 후에 다시 시도해주세요.",
 });
 
-// --- 라우팅 (Routing) ---
+// 라우팅
 app.get('/', (req, res) => {
     res.send('Artb Backend Server is running.');
 });
 
-// AI 분석 요청 처리
+// AI 분석 요청 처리 (구조화된 피드백 프롬프트 적용)
 app.post('/analyze', apiLimiter, upload.single('image'), async (req, res) => {
     try {
         if (!genAI) throw new Error("Google AI 서비스가 초기화되지 않았습니다.");
         if (!req.file) return res.status(400).json({ error: "이미지 파일이 없습니다." });
         
-        // --- 모델 이름 수정 ---
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-        const prompt = "당신은 친절하고 전문적인 미술 선생님입니다. 이 그림을 보고, 학생의 실력 향상에 도움이 될 만한 긍정적인 피드백과 구체적인 개선점을 설명해주세요. 구도, 명암, 형태, 창의성 등을 종합적으로 고려해서요.";
+        const prompt = `당신은 Artb의 마스터 AI '아르'입니다. 당신은 기술적으로는 예리한 미술 선생님의 눈을, 감성적으로는 지식이 풍부한 큐레이터의 마음을 가지고 있습니다. 제출된 그림을 분석하고, 다음 규칙을 반드시 지켜서 감상평을 작성해주세요:
+- **구조:** 답변은 반드시 "### 총평:", "### 칭찬할 점:", "### 보완할 점:"의 세 부분으로 구성합니다. 각 제목 뒤에는 콜론(:)을 붙여주세요.
+- **줄바꿈:** 각 부분은 두 번의 줄바꿈(\`\\n\\n\`)으로 명확하게 구분합니다.
+- **내용:** '총평'에서는 전체적인 인상을, '칭찬할 점'에서는 구도, 형태 등 가장 칭찬할 부분을, '보완할 점'에서는 명암, 채색 등 개선하면 그림이 더 좋아질 부분을 구체적인 제안과 함께 설명합니다.`;
         
         const imagePath = req.file.path;
         const imageBuffer = fs.readFileSync(imagePath);
@@ -122,15 +113,16 @@ app.post('/analyze', apiLimiter, upload.single('image'), async (req, res) => {
     }
 });
 
-// AI 스타일 분석 요청 처리
+// AI 스타일 분석 요청 처리 (구조화된 피드백 프롬프트 적용)
 app.post('/analyze-style', apiLimiter, upload.single('image'), async (req, res) => {
     try {
         if (!genAI) throw new Error("Google AI 서비스가 초기화되지 않았습니다.");
         if (!req.file) return res.status(400).json({ error: "이미지 파일이 없습니다." });
         
-        // --- 모델 이름 수정 ---
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-        const prompt = "You are an expert art historian. Analyze this image and describe its artistic style (e.g., realism, impressionism, abstract, cartoon, etc.). Also, suggest one or two famous artists with a similar style that the creator might find inspiring. Respond in a concise and encouraging tone, in Korean.";
+        const prompt = `당신은 Artb의 AI 큐레이터 '아르'입니다. 이 그림의 예술 사조(예: 사실주의, 인상주의, 추상화 등)를 분석하고, 비슷한 화풍을 가진 유명 작가 한두 명을 추천해주세요. 다음 규칙을 반드시 지켜서 답변해주세요:
+- **구조:** 답변은 반드시 "### 작품 스타일:", "### 비슷한 작가 추천:"의 두 부분으로 구성합니다. 각 제목 뒤에는 콜론(:)을 붙여주세요.
+- **줄바꿈:** 각 부분은 두 번의 줄바꿈(\`\\n\\n\`)으로 명확하게 구분합니다.`;
 
         const imagePath = req.file.path;
         const imageBuffer = fs.readFileSync(imagePath);
@@ -149,7 +141,7 @@ app.post('/analyze-style', apiLimiter, upload.single('image'), async (req, res) 
     }
 });
 
-// 설문조사 데이터 저장
+// 설문조사, 사전등록, 문의하기 라우트는 이전과 동일합니다.
 app.post('/survey', formLimiter, (req, res) => {
     const csvFilePath = path.join('/tmp', 'survey_results.csv');
     const { role, interests, feedback_text } = req.body;
@@ -169,8 +161,6 @@ app.post('/survey', formLimiter, (req, res) => {
         res.status(500).json({ error: '데이터 저장 중 오류가 발생했습니다.' });
     }
 });
-
-// 사전 등록 이메일 발송
 app.post('/preregister', formLimiter, async (req, res) => {
     try {
         if (!transporter) throw new Error("이메일 서비스가 초기화되지 않았습니다.");
@@ -185,8 +175,6 @@ app.post('/preregister', formLimiter, async (req, res) => {
         res.status(500).json({ error: '처리 중 오류가 발생했습니다.' });
     }
 });
-
-// 문의하기 이메일 발송
 app.post('/contact', formLimiter, async (req, res) => {
     try {
         if (!transporter) throw new Error("이메일 서비스가 초기화되지 않았습니다.");
