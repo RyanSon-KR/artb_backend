@@ -9,21 +9,32 @@ const nodemailer = require('nodemailer');
 const cors = require('cors'); // CORS 미들웨어 추가
 require('dotenv').config(); // .env 파일 사용을 위한 라이브러리
 
-// Express 앱 설정
-const app = express();
-// --- 중요: 'trust proxy' 설정 추가 ---
-// Vercel과 같은 프록시 환경에서 express-rate-limit이 사용자의 실제 IP를 올바르게 인식하도록 설정합니다.
-app.set('trust proxy', 1);
+// --- 환경 변수 로드 및 검증 (가장 먼저 실행) ---
+const API_KEY = process.env.GOOGLE_API_KEY;
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
+const RECIPIENT_EMAIL = process.env.RECIPIENT_EMAIL;
 
+// 서버 시작 전 필수 환경 변수가 모두 있는지 확인
+if (!API_KEY || !EMAIL_USER || !EMAIL_PASS || !RECIPIENT_EMAIL) {
+    console.error("!!! 치명적 오류: 필수 환경 변수가 Vercel에 설정되지 않았습니다.");
+    console.error("GOOGLE_API_KEY, EMAIL_USER, EMAIL_PASS, RECIPIENT_EMAIL 변수를 모두 확인해주세요.");
+    // 실제 운영에서는 여기서 프로세스를 종료할 수 있습니다.
+    // process.exit(1); 
+}
+
+// Express 앱과 Multer (파일 업로드 처리용)를 설정합니다.
+const app = express();
 const upload = multer({ dest: '/tmp' }); // Vercel의 쓰기 가능한 임시 폴더
 
 // --- 미들웨어 설정 ---
-// CORS 설정
+// CORS 설정: GitHub Pages 및 개인 도메인에서의 요청을 허용합니다.
 const allowedOrigins = [
     'http://artb.co.kr', 
     'https://artb.co.kr', 
     // 본인의 GitHub Pages 주소를 여기에 추가해주세요 (예: 'https://my-github-id.github.io')
 ];
+
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
@@ -34,27 +45,18 @@ const corsOptions = {
   },
   optionsSuccessStatus: 200
 };
+
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 app.use(express.json());
 
-// --- 환경 변수 로드 및 검증 ---
-const API_KEY = process.env.GOOGLE_API_KEY;
-const EMAIL_USER = process.env.EMAIL_USER;
-const EMAIL_PASS = process.env.EMAIL_PASS;
-const RECIPIENT_EMAIL = process.env.RECIPIENT_EMAIL;
-
-if (!API_KEY || !EMAIL_USER || !EMAIL_PASS || !RECIPIENT_EMAIL) {
-    console.error("!!! 치명적 오류: 필수 환경 변수가 Vercel에 설정되지 않았습니다.");
-    console.error("GOOGLE_API_KEY, EMAIL_USER, EMAIL_PASS, RECIPIENT_EMAIL 변수를 모두 확인해주세요.");
-}
-
-// --- 서비스 초기화 ---
+// --- 서비스 초기화 (오류 진단 강화) ---
 let genAI, transporter;
 try {
     if (!API_KEY) throw new Error("환경 변수 'GOOGLE_API_KEY'가 설정되지 않았습니다.");
     genAI = new GoogleGenerativeAI(API_KEY);
+    console.log("Google AI 서비스 초기화 성공.");
 
     if (!EMAIL_USER || !EMAIL_PASS) throw new Error("환경 변수 'EMAIL_USER' 또는 'EMAIL_PASS'가 설정되지 않았습니다.");
     transporter = nodemailer.createTransport({
@@ -64,8 +66,11 @@ try {
             pass: EMAIL_PASS,
         },
     });
+    console.log("Nodemailer (이메일) 서비스 초기화 성공.");
 } catch (error) {
-    console.error("### 치명적 오류: 서비스 초기화 실패! ###", error.message);
+    console.error("### 치명적 오류: 서비스 초기화 실패! ###");
+    console.error(error.message);
+    console.error("Vercel의 [Settings] > [Environment Variables] 설정을 다시 확인해주세요.");
 }
 
 // --- 사용량 제한 (Rate Limiter) 설정 ---
@@ -96,7 +101,8 @@ app.post('/analyze', apiLimiter, upload.single('image'), async (req, res) => {
         if (!genAI) throw new Error("Google AI 서비스가 초기화되지 않았습니다.");
         if (!req.file) return res.status(400).json({ error: "이미지 파일이 없습니다." });
         
-        const model = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
+        // --- 모델 이름 수정 ---
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
         const prompt = "당신은 친절하고 전문적인 미술 선생님입니다. 이 그림을 보고, 학생의 실력 향상에 도움이 될 만한 긍정적인 피드백과 구체적인 개선점을 설명해주세요. 구도, 명암, 형태, 창의성 등을 종합적으로 고려해서요.";
         
         const imagePath = req.file.path;
@@ -122,7 +128,8 @@ app.post('/analyze-style', apiLimiter, upload.single('image'), async (req, res) 
         if (!genAI) throw new Error("Google AI 서비스가 초기화되지 않았습니다.");
         if (!req.file) return res.status(400).json({ error: "이미지 파일이 없습니다." });
         
-        const model = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
+        // --- 모델 이름 수정 ---
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
         const prompt = "You are an expert art historian. Analyze this image and describe its artistic style (e.g., realism, impressionism, abstract, cartoon, etc.). Also, suggest one or two famous artists with a similar style that the creator might find inspiring. Respond in a concise and encouraging tone, in Korean.";
 
         const imagePath = req.file.path;
