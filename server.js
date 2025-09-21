@@ -14,19 +14,28 @@ const app = express();
 const upload = multer({ dest: 'uploads/' });
 
 // --- 미들웨어 설정 ---
-// CORS 설정: GitHub Pages와 같은 다른 도메인에서의 요청을 허용합니다.
-// 중요: 실제 프로덕션에서는 특정 도메인만 허용하는 것이 더 안전합니다.
-const allowedOrigins = ['http://artb.co.kr', 'https://artb.co.kr', 'https://your-github-id.github.io'];
-app.use(cors({
+// CORS 설정: GitHub Pages 및 개인 도메인에서의 요청을 허용합니다.
+const allowedOrigins = [
+    'http://artb.co.kr', 
+    'https://artb.co.kr', 
+    'https://YOUR_GITHUB_ID.github.io' // <<-- 중요: YOUR_GITHUB_ID를 실제 GitHub 아이디로 변경하세요.
+];
+
+const corsOptions = {
   origin: function (origin, callback) {
-    // 요청에 origin이 없거나 (예: Postman), 허용된 origin 목록에 있으면 허용
+    // 허용된 origin 목록에 있거나, origin이 없는 경우(Postman 등) 허용
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      callback(new Error('CORS 정책에 의해 허용되지 않는 Origin입니다.'));
     }
-  }
-}));
+  },
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // 모든 경로에 대한 pre-flight 요청 허용
+
 app.use(express.json()); // JSON 요청 본문을 파싱
 
 // --- 환경 변수 설정 ---
