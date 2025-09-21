@@ -16,8 +16,17 @@ const upload = multer({ dest: 'uploads/' });
 // --- 미들웨어 설정 ---
 // CORS 설정: GitHub Pages와 같은 다른 도메인에서의 요청을 허용합니다.
 // 중요: 실제 프로덕션에서는 특정 도메인만 허용하는 것이 더 안전합니다.
-// 예: app.use(cors({ origin: 'https://your-github-id.github.io' }));
-app.use(cors()); 
+const allowedOrigins = ['http://artb.co.kr', 'https://artb.co.kr', 'https://your-github-id.github.io'];
+app.use(cors({
+  origin: function (origin, callback) {
+    // 요청에 origin이 없거나 (예: Postman), 허용된 origin 목록에 있으면 허용
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+}));
 app.use(express.json()); // JSON 요청 본문을 파싱
 
 // --- 환경 변수 설정 ---
@@ -59,10 +68,9 @@ const formLimiter = rateLimit({
 });
 
 // --- 라우팅 (Routing) ---
-// 로컬 테스트를 위한 기본 경로
-app.use(express.static(__dirname)); 
+// Vercel에서 서버가 살아있는지 확인하는 기본 경로
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    res.send('Artb Backend Server is running.');
 });
 
 // AI 분석 요청 처리
@@ -120,7 +128,7 @@ app.post('/analyze-style', apiLimiter, upload.single('image'), async (req, res) 
 
 // 설문조사 데이터 저장
 app.post('/survey', formLimiter, (req, res) => {
-    const csvFilePath = path.join(__dirname, 'survey_results.csv');
+    const csvFilePath = path.join('/tmp', 'survey_results.csv'); // Vercel의 임시 쓰기 가능 폴더
     const { role, interests, feedback_text } = req.body;
     const timestamp = new Date().toISOString();
     const interestsText = Array.isArray(interests) ? interests.join(', ') : '';
