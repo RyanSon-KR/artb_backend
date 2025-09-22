@@ -6,15 +6,22 @@ const fs = require('fs');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
-const cors = require('cors'); 
-require('dotenv').config();
+const cors = require('cors'); // CORS 미들웨어 추가
+require('dotenv').config(); // .env 파일 사용을 위한 라이브러리
 
-// Express 앱 설정
+// --- 환경 변수 로드 ---
+const API_KEY = process.env.GOOGLE_API_KEY;
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
+const RECIPIENT_EMAIL = process.env.RECIPIENT_EMAIL;
+
+// Express 앱과 Multer (파일 업로드 처리용)를 설정합니다.
 const app = express();
 app.set('trust proxy', 1);
-const upload = multer({ dest: '/tmp' });
+const upload = multer({ dest: '/tmp' }); // Vercel의 쓰기 가능한 임시 폴더
 
-// CORS 설정
+// --- 미들웨어 설정 ---
+// CORS 설정: GitHub Pages 및 개인 도메인에서의 요청을 허용합니다.
 const allowedOrigins = [
     'http://artb.co.kr', 
     'https://artb.co.kr', 
@@ -35,21 +42,12 @@ app.options('*', cors(corsOptions));
 
 app.use(express.json());
 
-// 환경 변수 로드 및 검증
-const API_KEY = process.env.GOOGLE_API_KEY;
-const EMAIL_USER = process.env.EMAIL_USER;
-const EMAIL_PASS = process.env.EMAIL_PASS;
-const RECIPIENT_EMAIL = process.env.RECIPIENT_EMAIL;
-
-if (!API_KEY || !EMAIL_USER || !EMAIL_PASS || !RECIPIENT_EMAIL) {
-    console.error("!!! 치명적 오류: 필수 환경 변수가 Vercel에 설정되지 않았습니다.");
-}
-
-// 서비스 초기화
+// --- 서비스 초기화 (오류 진단 강화) ---
 let genAI, transporter;
 try {
     if (!API_KEY) throw new Error("환경 변수 'GOOGLE_API_KEY'가 설정되지 않았습니다.");
     genAI = new GoogleGenerativeAI(API_KEY);
+    console.log("Google AI 서비스 초기화 성공.");
 
     if (!EMAIL_USER || !EMAIL_PASS) throw new Error("환경 변수 'EMAIL_USER' 또는 'EMAIL_PASS'가 설정되지 않았습니다.");
     transporter = nodemailer.createTransport({
@@ -59,11 +57,14 @@ try {
             pass: EMAIL_PASS,
         },
     });
+    console.log("Nodemailer (이메일) 서비스 초기화 성공.");
 } catch (error) {
-    console.error("### 치명적 오류: 서비스 초기화 실패! ###", error.message);
+    console.error("### 치명적 오류: 서비스 초기화 실패! ###");
+    console.error(error.message);
+    console.error("Vercel의 [Settings] > [Environment Variables] 설정을 다시 확인해주세요.");
 }
 
-// 사용량 제한 설정
+// --- 사용량 제한 (Rate Limiter) 설정 ---
 const apiLimiter = rateLimit({
 	windowMs: 15 * 60 * 1000,
 	max: 50,
@@ -71,6 +72,7 @@ const apiLimiter = rateLimit({
 	legacyHeaders: false,
     message: "AI 분석 요청 횟수가 너무 많습니다. 15분 후에 다시 시도해주세요.",
 });
+
 const formLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
     max: 10,
@@ -79,13 +81,15 @@ const formLimiter = rateLimit({
     message: "폼 제출 횟수가 너무 많습니다. 1시간 후에 다시 시도해주세요.",
 });
 
-// 라우팅
+// --- 라우팅 (Routing) ---
 app.get('/', (req, res) => {
+    console.log("Health check '/' 요청 수신.");
     res.send('Artb Backend Server is running.');
 });
 
-// AI 분석 요청 처리 (전문 평가 프롬프트 적용)
+// AI 분석 요청 처리
 app.post('/analyze', apiLimiter, upload.single('image'), async (req, res) => {
+    console.log("POST /analyze 요청 수신.");
     try {
         if (!genAI) throw new Error("Google AI 서비스가 초기화되지 않았습니다.");
         if (!req.file) return res.status(400).json({ error: "이미지 파일이 없습니다." });
@@ -120,6 +124,7 @@ app.post('/analyze', apiLimiter, upload.single('image'), async (req, res) => {
         const feedbackText = result.response.text();
         
         fs.unlinkSync(imagePath);
+        console.log("/analyze 요청 처리 성공.");
         res.json({ feedback: feedbackText });
     } catch (error) {
         console.error("AI 분석 중 오류 발생:", error);
@@ -128,8 +133,9 @@ app.post('/analyze', apiLimiter, upload.single('image'), async (req, res) => {
     }
 });
 
-// AI 스타일 분석 요청 처리 (구조화된 피드백 프롬프트 적용)
+// AI 스타일 분석 요청 처리
 app.post('/analyze-style', apiLimiter, upload.single('image'), async (req, res) => {
+    console.log("POST /analyze-style 요청 수신.");
     try {
         if (!genAI) throw new Error("Google AI 서비스가 초기화되지 않았습니다.");
         if (!req.file) return res.status(400).json({ error: "이미지 파일이 없습니다." });
@@ -150,6 +156,7 @@ app.post('/analyze-style', apiLimiter, upload.single('image'), async (req, res) 
         const styleFeedback = result.response.text();
 
         fs.unlinkSync(imagePath);
+        console.log("/analyze-style 요청 처리 성공.");
         res.json({ style_feedback: styleFeedback });
     } catch (error) {
         console.error("AI 스타일 분석 중 오류 발생:", error);
@@ -158,8 +165,9 @@ app.post('/analyze-style', apiLimiter, upload.single('image'), async (req, res) 
     }
 });
 
-// 설문조사, 사전등록, 문의하기 라우트는 이전과 동일합니다.
+// 설문조사 데이터 저장
 app.post('/survey', formLimiter, (req, res) => {
+    console.log("POST /survey 요청 수신.");
     const csvFilePath = path.join('/tmp', 'survey_results.csv');
     const { role, interests, feedback_text } = req.body;
     const timestamp = new Date().toISOString();
@@ -172,34 +180,45 @@ app.post('/survey', formLimiter, (req, res) => {
             fs.writeFileSync(csvFilePath, 'Timestamp,Role,Interests,Feedback\n');
         }
         fs.appendFileSync(csvFilePath, csvRow);
+        console.log("/survey 요청 처리 성공.");
         res.status(200).json({ message: '설문이 성공적으로 제출되었습니다.' });
     } catch (error) {
         console.error('설문 데이터 저장 오류:', error);
         res.status(500).json({ error: '데이터 저장 중 오류가 발생했습니다.' });
     }
 });
+
+// 사전 등록 이메일 발송
 app.post('/preregister', formLimiter, async (req, res) => {
+    console.log("POST /preregister 요청 수신.");
     try {
         if (!transporter) throw new Error("이메일 서비스가 초기화되지 않았습니다.");
         const { email } = req.body;
         if (!email) return res.status(400).json({ error: '이메일 주소가 필요합니다.' });
+        if (!RECIPIENT_EMAIL) return res.status(500).json({ error: '서버 이메일 설정이 필요합니다.' });
 
         const mailOptions = { from: `"Artb 알림" <${EMAIL_USER}>`, to: RECIPIENT_EMAIL, subject: '🎉 Artb 신규 사전 등록 알림', html: `<h3>새로운 사용자가 사전 등록했습니다!</h3><p><strong>이메일:</strong> ${email}</p>`};
         await transporter.sendMail(mailOptions);
+        console.log("/preregister 요청 처리 성공.");
         res.status(200).json({ message: '사전 등록이 완료되었습니다.' });
     } catch (error) {
         console.error('사전 등록 이메일 발송 오류:', error);
         res.status(500).json({ error: '처리 중 오류가 발생했습니다.' });
     }
 });
+
+// 문의하기 이메일 발송
 app.post('/contact', formLimiter, async (req, res) => {
+    console.log("POST /contact 요청 수신.");
     try {
         if (!transporter) throw new Error("이메일 서비스가 초기화되지 않았습니다.");
         const { name, email, message } = req.body;
         if (!name || !email || !message) return res.status(400).json({ error: '모든 필드를 입력해주세요.' });
+        if (!RECIPIENT_EMAIL) return res.status(500).json({ error: '서버 이메일 설정이 필요합니다.' });
 
         const mailOptions = { from: `"Artb 문의" <${EMAIL_USER}>`, to: RECIPIENT_EMAIL, subject: `📢 Artb 새로운 문의 도착: ${name}님`, html: `<h3>새로운 문의가 도착했습니다.</h3><p><strong>보낸 사람:</strong> ${name}</p><p><strong>이메일:</strong> ${email}</p><hr><p><strong>내용:</strong></p><p>${message.replace(/\n/g, '<br>')}</p>`};
         await transporter.sendMail(mailOptions);
+        console.log("/contact 요청 처리 성공.");
         res.status(200).json({ message: '문의가 성공적으로 전달되었습니다.' });
     } catch (error) {
         console.error('문의 이메일 발송 오류:', error);
