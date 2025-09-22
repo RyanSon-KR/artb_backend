@@ -84,7 +84,7 @@ app.get('/', (req, res) => {
     res.send('Artb Backend Server is running.');
 });
 
-// AI 분석 요청 처리
+// AI 분석 요청 처리 (구조화된 피드백 프롬프트 적용)
 app.post('/analyze', apiLimiter, upload.single('image'), async (req, res) => {
     try {
         if (!genAI) throw new Error("Google AI 서비스가 초기화되지 않았습니다.");
@@ -113,7 +113,7 @@ app.post('/analyze', apiLimiter, upload.single('image'), async (req, res) => {
     }
 });
 
-// AI 스타일 분석 요청 처리
+// AI 스타일 분석 요청 처리 (구조화된 피드백 프롬프트 적용)
 app.post('/analyze-style', apiLimiter, upload.single('image'), async (req, res) => {
     try {
         if (!genAI) throw new Error("Google AI 서비스가 초기화되지 않았습니다.");
@@ -141,7 +141,7 @@ app.post('/analyze-style', apiLimiter, upload.single('image'), async (req, res) 
     }
 });
 
-// 설문조사 데이터 저장
+// 설문조사, 사전등록, 문의하기 라우트는 이전과 동일합니다.
 app.post('/survey', formLimiter, (req, res) => {
     const csvFilePath = path.join('/tmp', 'survey_results.csv');
     const { role, interests, feedback_text } = req.body;
@@ -161,8 +161,6 @@ app.post('/survey', formLimiter, (req, res) => {
         res.status(500).json({ error: '데이터 저장 중 오류가 발생했습니다.' });
     }
 });
-
-// 사전 등록 이메일 발송
 app.post('/preregister', formLimiter, async (req, res) => {
     try {
         if (!transporter) throw new Error("이메일 서비스가 초기화되지 않았습니다.");
@@ -177,8 +175,6 @@ app.post('/preregister', formLimiter, async (req, res) => {
         res.status(500).json({ error: '처리 중 오류가 발생했습니다.' });
     }
 });
-
-// 문의하기 이메일 발송
 app.post('/contact', formLimiter, async (req, res) => {
     try {
         if (!transporter) throw new Error("이메일 서비스가 초기화되지 않았습니다.");
